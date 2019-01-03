@@ -5,8 +5,14 @@ const xlsx = require("xlsx");
 
 var args = process.argv.slice(2);
 
+if (args.length != 3) {
+  console.error("Incorrect number of arguments. Exiting process.");
+  process.exit(1);
+}
+
 const authToken = args[0];
 const orgId = args[1];
+const projectId = args[2];
 
 let axiosInstance = axios.create({
   baseURL: "https://books.zoho.in/api/v3/",
@@ -14,6 +20,29 @@ let axiosInstance = axios.create({
     Authorization: "Zoho-authtoken " + authToken,
   },
 });
+
+axiosInstance
+  .get("projects/" + projectId, {
+    organization_id: orgId,
+  })
+  .then(res => {
+    console.log("Found project");
+  })
+  .catch(err => {
+    console.log("Unable to find project ID: ", projectId);
+    axiosInstance
+      .get("projects", {
+        organization_id: orgId,
+      })
+      .then(res => {
+        console.error("Did you mean any of the following? ");
+        res.data.projects.forEach(project => {
+          console.error(project.project_id, ": ", project.project_name);
+        });
+
+        process.exit(1);
+      });
+  });
 
 axios
   .all([
@@ -63,7 +92,7 @@ axios
           Id: element.bill_number,
           Status: element.status,
         };
-        console.log("HERE");
+
         if (element.has_attachment) {
           commonBill["Attachment"] = element.bill_number;
           downloadAttachment(
@@ -114,18 +143,20 @@ axios
           //   xlsx.utils.book_append_sheet(wb, ws3, "Invoices");
 
           xlsx.writeFile(wb, "zoho.xlsx");
+
+          console.log(
+            "Created file zoho.xlsx! Find attachments in the extract folder."
+          );
         }
       );
     })
   );
 
 async function downloadAttachment(uri, folder, filename) {
-  console.log(uri);
   const response = await axiosInstance.get(uri, {
     responseType: "stream",
     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
   });
-  console.log(response.headers);
   const contentType = response.headers["content-disposition"];
   const savedFile = contentType
     .split("filename=")[1]
@@ -139,7 +170,6 @@ async function downloadAttachment(uri, folder, filename) {
     "extract/" + folder,
     filename + "." + format
   );
-  console.log(currentPath);
   const writer = fs.createWriteStream(currentPath);
 
   writer.on("open", async function(fd) {
@@ -157,14 +187,16 @@ async function loadExpenses(expenseId, commonExpense) {
   const res = await axiosInstance.get("expenses/" + expenseId);
 
   res.data.expense.line_items.forEach(x => {
-    let itemExpense = Object.assign({}, commonExpense);
-    itemExpense["Currency"] = res.data.expense.currency_code;
-    itemExpense["Currency Rate"] = res.data.expense.exchange_rate;
-    itemExpense["Line Item Id"] = x.line_item_id;
-    itemExpense["Description"] = x.description;
-    itemExpense["Account Name"] = x.account_name;
-    itemExpense["Amount in INR"] = x.amount * res.data.expense.exchange_rate;
-    currentExpense.push(itemExpense);
+    if (res.data.expense.project_id === projectId) {
+      let itemExpense = Object.assign({}, commonExpense);
+      itemExpense["Currency"] = res.data.expense.currency_code;
+      itemExpense["Currency Rate"] = res.data.expense.exchange_rate;
+      itemExpense["Line Item Id"] = x.line_item_id;
+      itemExpense["Description"] = x.description;
+      itemExpense["Account Name"] = x.account_name;
+      itemExpense["Amount in INR"] = x.amount * res.data.expense.exchange_rate;
+      currentExpense.push(itemExpense);
+    }
   });
   return currentExpense;
 }
@@ -179,14 +211,16 @@ async function loadBills(billId, commonBill, vendorId) {
   const res = await axiosInstance.get("bills/" + billId);
 
   res.data.bill.line_items.forEach(x => {
-    let itemBill = Object.assign({}, commonBill);
-    itemBill["Currency"] = res.data.bill.currency_code;
-    itemBill["Currency Rate"] = res.data.bill.exchange_rate;
-    itemBill["Line Item Id"] = x.line_item_id;
-    itemBill["Description"] = x.description;
-    itemBill["Account Name"] = x.account_name;
-    itemBill["Amount in INR"] = x.item_total * res.data.bill.exchange_rate;
-    currentBill.push(itemBill);
+    if (x.project_id === projectId) {
+      let itemBill = Object.assign({}, commonBill);
+      itemBill["Currency"] = res.data.bill.currency_code;
+      itemBill["Currency Rate"] = res.data.bill.exchange_rate;
+      itemBill["Line Item Id"] = x.line_item_id;
+      itemBill["Description"] = x.description;
+      itemBill["Account Name"] = x.account_name;
+      itemBill["Amount in INR"] = x.item_total * res.data.bill.exchange_rate;
+      currentBill.push(itemBill);
+    }
   });
   return currentBill;
 }
@@ -195,16 +229,18 @@ async function loadInvoices(invoiceId, commonInvoice) {
   let currentInvoice = [];
   const res = await axiosInstance.get("invoices/" + invoiceId);
 
-  currentInvoice = res.data.invoice.line_items.map(x => {
-    let itemInvoice = Object.assign({}, commonInvoice);
-    itemInvoice["Currency"] = res.data.invoice.currency_code;
-    itemInvoice["Currency Rate"] = res.data.invoice.exchange_rate;
-    itemInvoice["Line Item Id"] = x.line_item_id;
-    itemInvoice["Description"] = x.name || x.description;
-    itemInvoice["Account Name"] = x.account_name;
-    itemInvoice["Amount in INR"] =
-      x.item_total * res.data.invoice.exchange_rate;
-    return itemInvoice;
+  res.data.invoice.line_items.forEach(x => {
+    if (x.project_id === projectId) {
+      let itemInvoice = Object.assign({}, commonInvoice);
+      itemInvoice["Currency"] = res.data.invoice.currency_code;
+      itemInvoice["Currency Rate"] = res.data.invoice.exchange_rate;
+      itemInvoice["Line Item Id"] = x.line_item_id;
+      itemInvoice["Description"] = x.name || x.description;
+      itemInvoice["Account Name"] = x.account_name;
+      itemInvoice["Amount in INR"] =
+        x.item_total * res.data.invoice.exchange_rate;
+      currentInvoice.push(itemInvoice);
+    }
   });
   return currentInvoice;
 }
