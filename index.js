@@ -125,9 +125,15 @@ async function downloadAttachment(uri, folder, filename) {
     responseType: "stream",
     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
   });
+  console.log(response.headers);
+  const contentType = response.headers["content-disposition"];
+  const savedFile = contentType
+    .split("filename=")[1]
+    .replace(/"/g, "")
+    .trim();
 
-  const contentType = response.headers["content-type"];
-  const format = contentType.substring(contentType.lastIndexOf("/") + 1);
+  const format = savedFile.substring(savedFile.lastIndexOf(".") + 1);
+
   const currentPath = path.resolve(
     __dirname,
     "extract/" + folder,
