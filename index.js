@@ -29,7 +29,8 @@ axiosInstance
     console.log("Found project");
   })
   .catch(err => {
-    console.log("Unable to find project ID: ", projectId);
+    console.error("Unable to find project ID: ", projectId);
+    console.error("Error while retrieving project: ", err);
     axiosInstance
       .get("projects", {
         organization_id: orgId,
@@ -41,6 +42,10 @@ axiosInstance
         });
 
         process.exit(1);
+      })
+      .catch(err => {
+        console.error("Unable to retrieve list of  available projects either.");
+        console.error(err);
       });
   });
 
@@ -131,8 +136,8 @@ axios
         return loadInvoices(invoiceId, commonInvoice);
       });
 
-      Promise.all([...mappedExpense, ...mappedBills, ...mappedInvoices]).then(
-        x => {
+      Promise.all([...mappedExpense, ...mappedBills, ...mappedInvoices])
+        .then(x => {
           let y = x.reduce((a, b) => a.concat(b), []);
 
           let ws1 = xlsx.utils.json_to_sheet(y);
@@ -147,100 +152,122 @@ axios
           console.log(
             "Created file zoho.xlsx! Find attachments in the extract folder."
           );
-        }
-      );
+        })
+        .catch(err => {
+          console.error("Unable to create report.");
+          console.error("Error: ", err);
+        });
     })
-  );
+  )
+  .catch(err => {
+    console.error("Error will retrieving project details: ", err);
+  });
 
 async function downloadAttachment(uri, folder, filename) {
-  const response = await axiosInstance.get(uri, {
-    responseType: "stream",
-    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-  });
-  const contentType = response.headers["content-disposition"];
-  const savedFile = contentType
-    .split("filename=")[1]
-    .replace(/"/g, "")
-    .trim();
-
-  const format = savedFile.substring(savedFile.lastIndexOf(".") + 1);
-
-  const currentPath = path.resolve(
-    __dirname,
-    "extract/" + folder,
-    filename + "." + format
-  );
-  const writer = fs.createWriteStream(currentPath);
-
-  writer.on("open", async function(fd) {
-    response.data.pipe(writer);
-
-    return new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
+  try {
+    const response = await axiosInstance.get(uri, {
+      responseType: "stream",
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
     });
-  });
+    const contentType = response.headers["content-disposition"];
+    const savedFile = contentType
+      .split("filename=")[1]
+      .replace(/"/g, "")
+      .trim();
+
+    const format = savedFile.substring(savedFile.lastIndexOf(".") + 1);
+
+    const currentPath = path.resolve(
+      __dirname,
+      "extract/" + folder,
+      filename + "." + format
+    );
+    const writer = fs.createWriteStream(currentPath);
+
+    writer.on("open", async function(fd) {
+      response.data.pipe(writer);
+
+      return new Promise((resolve, reject) => {
+        writer.on("finish", resolve);
+        writer.on("error", reject);
+      });
+    });
+  } catch (err) {
+    console.error("Error while downloading attachment: ", err);
+  }
 }
 
 async function loadExpenses(expenseId, commonExpense) {
   let currentExpense = [];
-  const res = await axiosInstance.get("expenses/" + expenseId);
+  try {
+    const res = await axiosInstance.get("expenses/" + expenseId);
 
-  res.data.expense.line_items.forEach(x => {
-    if (res.data.expense.project_id === projectId) {
-      let itemExpense = Object.assign({}, commonExpense);
-      itemExpense["Currency"] = res.data.expense.currency_code;
-      itemExpense["Currency Rate"] = res.data.expense.exchange_rate;
-      itemExpense["Line Item Id"] = x.line_item_id;
-      itemExpense["Description"] = x.description;
-      itemExpense["Account Name"] = x.account_name;
-      itemExpense["Amount in INR"] = x.amount * res.data.expense.exchange_rate;
-      currentExpense.push(itemExpense);
-    }
-  });
+    res.data.expense.line_items.forEach(x => {
+      if (res.data.expense.project_id === projectId) {
+        let itemExpense = Object.assign({}, commonExpense);
+        itemExpense["Currency"] = res.data.expense.currency_code;
+        itemExpense["Currency Rate"] = res.data.expense.exchange_rate;
+        itemExpense["Line Item Id"] = x.line_item_id;
+        itemExpense["Description"] = x.description;
+        itemExpense["Account Name"] = x.account_name;
+        itemExpense["Amount in INR"] =
+          x.amount * res.data.expense.exchange_rate;
+        currentExpense.push(itemExpense);
+      }
+    });
+  } catch (err) {
+    console.error("Error while loading expenses: ", err);
+  }
   return currentExpense;
 }
 
 async function loadBills(billId, commonBill, vendorId) {
   let currentBill = [];
+  try {
+    const vendor = await axiosInstance.get("contacts/" + vendorId);
 
-  const vendor = await axiosInstance.get("contacts/" + vendorId);
+    commonBill.Vendor = vendor.data.contact.contact_name;
 
-  commonBill.Vendor = vendor.data.contact.contact_name;
+    const res = await axiosInstance.get("bills/" + billId);
 
-  const res = await axiosInstance.get("bills/" + billId);
-
-  res.data.bill.line_items.forEach(x => {
-    if (x.project_id === projectId) {
-      let itemBill = Object.assign({}, commonBill);
-      itemBill["Currency"] = res.data.bill.currency_code;
-      itemBill["Currency Rate"] = res.data.bill.exchange_rate;
-      itemBill["Line Item Id"] = x.line_item_id;
-      itemBill["Description"] = x.description;
-      itemBill["Account Name"] = x.account_name;
-      itemBill["Amount in INR"] = x.item_total * res.data.bill.exchange_rate;
-      currentBill.push(itemBill);
-    }
-  });
+    res.data.bill.line_items.forEach(x => {
+      if (x.project_id === projectId) {
+        let itemBill = Object.assign({}, commonBill);
+        itemBill["Currency"] = res.data.bill.currency_code;
+        itemBill["Currency Rate"] = res.data.bill.exchange_rate;
+        itemBill["Line Item Id"] = x.line_item_id;
+        itemBill["Description"] = x.description;
+        itemBill["Account Name"] = x.account_name;
+        itemBill["Amount in INR"] = x.item_total * res.data.bill.exchange_rate;
+        currentBill.push(itemBill);
+      }
+    });
+  } catch (err) {
+    console.error("Error while loading bills: ", err);
+  }
   return currentBill;
 }
 
 async function loadInvoices(invoiceId, commonInvoice) {
   let currentInvoice = [];
-  const res = await axiosInstance.get("invoices/" + invoiceId);
+  try {
+    const res = await axiosInstance.get("invoices/" + invoiceId);
 
-  res.data.invoice.line_items.forEach(x => {
-    if (x.project_id === projectId) {
-      let itemInvoice = Object.assign({}, commonInvoice);
-      itemInvoice["Currency"] = res.data.invoice.currency_code;
-      itemInvoice["Currency Rate"] = res.data.invoice.exchange_rate;
-      itemInvoice["Line Item Id"] = x.line_item_id;
-      itemInvoice["Description"] = x.name || x.description;
-      itemInvoice["Account Name"] = x.account_name;
-      itemInvoice["Amount in INR"] =
-        x.item_total * res.data.invoice.exchange_rate;
-      currentInvoice.push(itemInvoice);
-    }
-  });
+    res.data.invoice.line_items.forEach(x => {
+      if (x.project_id === projectId) {
+        let itemInvoice = Object.assign({}, commonInvoice);
+        itemInvoice["Currency"] = res.data.invoice.currency_code;
+        itemInvoice["Currency Rate"] = res.data.invoice.exchange_rate;
+        itemInvoice["Line Item Id"] = x.line_item_id;
+        itemInvoice["Description"] = x.name || x.description;
+        itemInvoice["Account Name"] = x.account_name;
+        itemInvoice["Amount in INR"] =
+          x.item_total * res.data.invoice.exchange_rate;
+        currentInvoice.push(itemInvoice);
+      }
+    });
+  } catch (err) {
+    console.error("Error while loading invoices: ", err);
+  }
   return currentInvoice;
 }
