@@ -14,7 +14,6 @@ args.option(
 );
 
 const flags = args.parse(process.argv);
-console.log("HI");
 if (!flags.token || !flags.orgid || !flags.projectid || !flags.attachment) {
   console.error("Invalid usage");
   args.showHelp();
