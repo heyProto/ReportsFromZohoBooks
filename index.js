@@ -35,8 +35,6 @@ if (!flags.token || !flags.orgid || !flags.projectid || !flags.attachment) {
   process.exit(1)
 }
 
-console.log(flags)
-
 const authToken = flags.token
 const orgId = flags.orgid
 const projectId = flags.projectid
