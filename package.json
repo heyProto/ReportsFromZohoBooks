@@ -9,10 +9,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "args": "^5.0.0",
     "axios": "^0.18.0",
     "fs": "0.0.1-security",
     "path": "^0.12.7",
-    "xlsx": "^0.14.1"
+    "xlsx": "^0.14.1",
+    "yargs": "^13.1.0"
   }
 }
